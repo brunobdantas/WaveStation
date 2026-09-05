@@ -49,6 +49,16 @@ def patch_frequency_mode_fallback(root: Path) -> None:
     write(path, text)
 
 
+def patch_hvtxw_public_rtty_frequency(root: Path) -> None:
+    """Expose a narrow public wrapper around MSHV's existing private frequency path."""
+    path = root / "src" / "HvTxW" / "hvtxw.h"
+    text = read(path)
+    anchor = "    void SetBand(QString,int id);//0<-from App 1<-from Rig"
+    repl = anchor + "\n    void SetRttyPresetFreq(QString f) { SetDefFreqGlobal(3,f); } // WaveStation: force freq, preserve rig mode"
+    text = replace_one(text, anchor, repl, str(path))
+    write(path, text)
+
+
 def patch_rtty_runtime_presets(root: Path) -> None:
     """Apply RTTY dial presets from Main_Ms without altering saved settings format."""
     h = root / "src" / "main_ms.h"
@@ -63,6 +73,15 @@ def patch_rtty_runtime_presets(root: Path) -> None:
 
     path = root / "src" / "main_ms.cpp"
     text = read(path)
+
+    # Forward declaration is required because BandChanged() appears before the
+    # RTTY slot implementations in upstream main_ms.cpp.
+    text = replace_one(
+        text,
+        '#include "main_ms.h"',
+        '#include "main_ms.h"\n\nstatic QString WaveStationRttyPresetHz(int bandIndex);',
+        str(path),
+    )
 
     # Do not read getMy_Call() during application construction. MSHV populates
     # its macro/settings data later in startup. Resolve it only when RTTY is
@@ -105,14 +124,13 @@ void Main_Ms::RttyModeActive(bool on)
         if (!call.isEmpty()) TRtty->SetStationCall(call);
 
         // If RTTY is selected after the band, immediately tune that band's
-        // RTTY preset using MSHV's normal frequency/CAT path (id 3 = force
-        // frequency, do not change rig mode).
+        // RTTY preset through a narrow wrapper over MSHV's normal frequency/CAT path.
         for (int i=0; i<COUNT_BANDS; ++i)
         {
             if (ListBands.at(i)->isChecked())
             {
                 QString f = WaveStationRttyPresetHz(i);
-                if (!f.isEmpty()) THvTxW->SetDefFreqGlobal(3,f);
+                if (!f.isEmpty()) THvTxW->SetRttyPresetFreq(f);
                 break;
             }
         }
@@ -130,7 +148,7 @@ void Main_Ms::RttyModeActive(bool on)
             if (s_mode==19 && s_id_set_to_rig==0)
             {
                 QString rtty_f = WaveStationRttyPresetHz(i);
-                if (!rtty_f.isEmpty()) THvTxW->SetDefFreqGlobal(3,rtty_f);
+                if (!rtty_f.isEmpty()) THvTxW->SetRttyPresetFreq(rtty_f);
             }
             RefreshWindowTitle();'''
     text = replace_one(text, band_anchor, band_repl, str(path))
@@ -147,6 +165,7 @@ def main() -> None:
 
     # Deliberately DO NOT modify config_band_all.h / COUNT_FREQ_MODES.
     patch_frequency_mode_fallback(root)
+    patch_hvtxw_public_rtty_frequency(root)
     patch_rtty_runtime_presets(root)
     print("RTTY compatibility-safe presets applied:", root)
 
