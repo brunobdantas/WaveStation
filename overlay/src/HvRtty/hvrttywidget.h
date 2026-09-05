@@ -38,6 +38,7 @@ public slots:
     void SetActive(bool on);
     void SetMarkFrequency(double hz);
     void SetTxFinished();
+    void SetStationCall(QString call);
 
 private slots:
     void RebuildDecoders();
@@ -46,8 +47,10 @@ private slots:
     void AbortClicked();
     void ClearClicked();
     void MacroCq();
-    void MacroExch();
-    void MacroTu();
+    void MacroReport();
+    void MacroInfo();
+    void MacroRoger();
+    void Macro73();
 
 private:
     struct Lane {
@@ -70,6 +73,7 @@ private:
     QPushButton *sendBtn_;
     QPushButton *abortBtn_;
     bool active_;
+    QString myCall_;
     mshv_rtty::Decoder *mainDecoder_;
     QString mainBuffer_;
     QVector<Lane*> lanes_;
@@ -82,6 +86,7 @@ private:
     QElapsedTimer audioClock_;
     qint64 lastAudioMs_;
 
+    QString StationCall() const;
     mshv_rtty::Config CurrentConfig(double markHz) const;
     void DestroyDecoders();
     void Consume(QString &buffer, const std::string &text, double markHz, bool multi);
