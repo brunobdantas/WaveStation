@@ -148,6 +148,26 @@ jobs:
           "$hash  WaveStation.exe" | Set-Content -Encoding ascii (Join-Path $dist 'SHA256SUMS.txt')
           Get-ChildItem $dist -Recurse | Format-Table FullName, Length
 
+      - name: Startup smoke test
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dist = Join-Path $PWD 'dist'
+          $exe = Join-Path $dist 'WaveStation.exe'
+          if (-not (Test-Path $exe)) { throw 'WaveStation.exe missing before smoke test.' }
+
+          # Regression guard for the real failure mode reported by the operator:
+          # splash screen appears and the process dies during Main_Ms startup.
+          $proc = Start-Process -FilePath $exe -WorkingDirectory $dist -PassThru
+          Start-Sleep -Seconds 10
+          $proc.Refresh()
+          if ($proc.HasExited) {
+            $code = $proc.ExitCode
+            throw "WaveStation startup smoke test failed: process exited after splash (exit code $code)."
+          }
+          Stop-Process -Id $proc.Id -Force
+          Write-Host 'WaveStation startup smoke test passed: process remained alive beyond splash.'
+
       - name: Upload WaveStation artifact
         uses: actions/upload-artifact@v4
         with:
