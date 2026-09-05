@@ -42,7 +42,7 @@ def patch(out: Path, root: Path):
           '            "QLabel{background-color:rgb(92,235,220);",  //Color FT2\n            "QLabel{background-color:rgb(255,205,120);"}; //Color RTTY')
 
     p=out/'src/HvMsCore/mscore.h'
-    one(p,'signals:\n','signals:\n    void EmitRttyAudio(int*,int); // MSHV-RTTY native continuous audio\n')
+    one(p,'signals:\n    void Sed_SMeter(int);','signals:\n    void EmitRttyAudio(int*,int); // WaveStation RTTY continuous audio\n    void Sed_SMeter(int);')
     p=out/'src/HvMsCore/mscore.cpp'
     one(p,'    emit Set_Raw(dat,count,ffopen); //1.27 psk rep fopen bool true false no file open',
           '    emit Set_Raw(dat,count,ffopen); //1.27 psk rep fopen bool true false no file open\n    if (s_mod_iden==19) emit EmitRttyAudio(dat,count); // MSHV-RTTY')
