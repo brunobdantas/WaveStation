@@ -118,6 +118,17 @@ jobs:
             if (-not (Test-Path $p)) { throw "Required runtime path missing from artifact: $rel" }
           }
 
+          # Never ship the upstream author's personal/demo QSO records.
+          $adi = @(
+            'WaveStation alpha 2.76.7 64-bit ADIF Log',
+            '<ADIF_VER:5>3.1.0',
+            '<PROGRAMID:11>WaveStation',
+            '<PROGRAMVERSION:6>2.76.7',
+            '<EOH>'
+          ) -join "`r`n"
+          Set-Content -Path (Join-Path $dist 'log\mshvlog.adi') -Value $adi -Encoding ascii
+          Set-Content -Path (Join-Path $dist 'log\mshvlog.edim') -Value '[QSORecords; MSHV LOG FILE ID=20231018-273]' -Encoding ascii
+
           $deploy = Get-Command windeployqt.exe -ErrorAction SilentlyContinue
           if ($deploy) {
             & $deploy.Source --release --no-translations $target
