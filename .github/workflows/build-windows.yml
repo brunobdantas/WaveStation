@@ -45,6 +45,7 @@ jobs:
           qmake -v
           g++ --version
           mingw32-make --version
+          & "$env:pythonLocation\python.exe" --version
 
       - name: Download pinned MSHV source
         shell: pwsh
@@ -61,12 +62,14 @@ jobs:
       - name: Apply WaveStation RTTY integration
         shell: pwsh
         run: |
-          python tools/apply_mshv_rtty.py --source "$env:MSHV_SOURCE" --output "$PWD\work\WaveStation-src" --package-root "$PWD"
+          & "$env:pythonLocation\python.exe" tools/apply_mshv_rtty.py --source "$env:MSHV_SOURCE" --output "$PWD\work\WaveStation-src" --package-root "$PWD"
+          if ($LASTEXITCODE -ne 0) { throw "integration patch failed with exit code $LASTEXITCODE" }
 
       - name: Run standalone RTTY modem tests
         shell: pwsh
         run: |
           g++ -std=gnu++11 -Wall -Wextra -O2 tests/test_rtty.cpp overlay/src/HvRtty/rtty_core.cpp -o work/rtty_test.exe
+          if ($LASTEXITCODE -ne 0) { throw "RTTY modem test compilation failed with exit code $LASTEXITCODE" }
           & .\work\rtty_test.exe
           if ($LASTEXITCODE -ne 0) { throw "RTTY modem test failed with exit code $LASTEXITCODE" }
 
