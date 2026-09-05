@@ -1,0 +1,7 @@
+MSHV upstream repository: https://github.com/LZ2HV/MSHV
+Pinned upstream commit: 8f93eb3e25056f0cb18699ef6c3bef3998c52cdf
+
+Diddle reference repository: https://github.com/WW2DX/diddle
+RTTY design reference inspected from current main during development (2026-09-05).
+
+WaveStation CI only reads the upstream repositories. It does not push, fork, open PRs, or modify them.
