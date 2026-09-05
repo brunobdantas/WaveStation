@@ -13,6 +13,9 @@
 #include <QLabel>
 #include <QVector>
 #include <QString>
+#include <QMutex>
+#include <QTimer>
+#include <QElapsedTimer>
 #include "rtty_core.h"
 
 class HvRttyWidget : public QDialog
@@ -28,6 +31,9 @@ signals:
     void TuneRequested(double hz);
 
 public slots:
+    // Called with Qt::DirectConnection from the MSHV audio path. This slot MUST
+    // remain lightweight: it only copies samples into a bounded queue. DSP and
+    // all UI work run later on the GUI thread in ProcessPendingAudio().
     void FeedAudio(int *samples, int count);
     void SetActive(bool on);
     void SetMarkFrequency(double hz);
@@ -35,6 +41,7 @@ public slots:
 
 private slots:
     void RebuildDecoders();
+    void ProcessPendingAudio();
     void SendClicked();
     void AbortClicked();
     void ClearClicked();
@@ -59,12 +66,21 @@ private:
     QCheckBox *multi_;
     QLabel *spaceLabel_;
     QLabel *stateLabel_;
+    QLabel *audioLevelLabel_;
     QPushButton *sendBtn_;
     QPushButton *abortBtn_;
     bool active_;
     mshv_rtty::Decoder *mainDecoder_;
     QString mainBuffer_;
     QVector<Lane*> lanes_;
+
+    // Audio handoff between MSHV's capture path and the RTTY GUI/DSP path.
+    QMutex audioMutex_;
+    QVector<int> pendingAudio_;
+    int pendingPeak_;
+    QTimer *audioTimer_;
+    QElapsedTimer audioClock_;
+    qint64 lastAudioMs_;
 
     mshv_rtty::Config CurrentConfig(double markHz) const;
     void DestroyDecoders();
