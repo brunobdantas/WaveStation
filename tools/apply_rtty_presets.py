@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
-"""Apply WaveStation RTTY operating presets to an already patched MSHV tree.
+"""Apply WaveStation RTTY presets without changing MSHV's persisted frequency schema.
 
-This keeps the frequency behaviour inside MSHV's native per-mode/per-band
-frequency table, so RTTY behaves like FT8/FT4 when the operator selects a band.
+The upstream MSHV frequency-settings format has seven mode slots. Expanding it
+breaks compatibility with existing/bundled settings during startup, so RTTY
+uses the existing FSK slot only as a safe internal fallback and applies its own
+frequency preset explicitly when the operator activates RTTY or selects a band.
 """
 from pathlib import Path
 import argparse
-import re
 
 
 def read(path: Path) -> str:
@@ -20,84 +21,12 @@ def write(path: Path, text: str) -> None:
 def replace_one(text: str, old: str, new: str, label: str) -> str:
     count = text.count(old)
     if count != 1:
-        raise RuntimeError(f"{label}: expected one anchor, found {count}: {old[:160]}")
+        raise RuntimeError(f"{label}: expected one anchor, found {count}: {old[:180]}")
     return text.replace(old, new, 1)
 
 
-def patch_frequency_table(root: Path) -> None:
-    path = root / "src" / "config_band_all.h"
-    text = read(path)
-
-    text = replace_one(text, "#define COUNT_FREQ_MODES 7", "#define COUNT_FREQ_MODES 8", str(path))
-    text = replace_one(
-        text,
-        "static const uint8_t pos_mod_rea_frq[COUNT_FREQ_MODES]={0,1,6,2,3,4,5};",
-        "static const uint8_t pos_mod_rea_frq[COUNT_FREQ_MODES]={0,1,6,2,3,4,5,7};",
-        str(path),
-    )
-    text = replace_one(
-        text,
-        "static const uint8_t pos_mod_sav_frq[COUNT_FREQ_MODES]={0,1,3,4,5,6,2};",
-        "static const uint8_t pos_mod_sav_frq[COUNT_FREQ_MODES]={0,1,3,4,5,6,2,7};",
-        str(path),
-    )
-    text = replace_one(
-        text,
-        'static const QString ModeStrForFerq[COUNT_FREQ_MODES]={"MSK","FSK","FT4","FT8","JT65","Q65","FT2"};',
-        'static const QString ModeStrForFerq[COUNT_FREQ_MODES]={"MSK","FSK","FT4","FT8","JT65","Q65","FT2","RTTY"};',
-        str(path),
-    )
-
-    # Defaults are dial-frequency starting points, not exclusive channels.
-    # HF choices follow common RTTY activity in Region 2 and remain inside
-    # IARU-R2 digital/all-mode segments. Bands without a broadly established
-    # RTTY watering hole inherit MSHV's existing FSK-family default.
-    rtty = {
-        3: "1.840.000",   # 160 m - very low RTTY activity
-        4: "3.580.000",   # 80 m
-        6: "7.080.000",   # 40 m - common Region-2/Americas RTTY activity
-        7: "10.140.000",  # 30 m
-        8: "14.080.000",  # 20 m
-        9: "18.100.000",  # 17 m
-        10: "21.080.000", # 15 m
-        11: "24.920.000", # 12 m
-        13: "28.080.000", # 10 m
-        15: "50.300.000", # 6 m - digital weak-signal area; operator may retune
-    }
-
-    marker = "#if defined _ALLBANDSMODSFRQ_H_"
-    start = text.find(marker)
-    if start < 0:
-        raise RuntimeError(f"{path}: active frequency table marker not found")
-    end = text.find("#endif", start)
-    if end < 0:
-        raise RuntimeError(f"{path}: frequency table end not found")
-
-    section = text[start:end]
-    rows = 0
-    output = []
-    for line in section.splitlines(True):
-        values = re.findall(r'"([^"]+)"', line)
-        # The upstream file retains one commented-out legacy 143 MHz row.
-        # Never let commented examples affect the active-band index mapping.
-        active_row = not line.lstrip().startswith("//")
-        if active_row and len(values) == 7 and "{" in line and "}" in line:
-            default = rtty.get(rows, values[1])
-            close = line.rfind("}")
-            if close < 0:
-                raise RuntimeError(f"{path}: malformed frequency row {rows}")
-            line = line[:close] + ',       "' + default + '"' + line[close:]
-            rows += 1
-        output.append(line)
-
-    if rows != 33:
-        raise RuntimeError(f"{path}: expected 33 active band rows, patched {rows}")
-
-    text = text[:start] + "".join(output) + text[end:]
-    write(path, text)
-
-
-def patch_frequency_mode_mapping(root: Path) -> None:
+def patch_frequency_mode_fallback(root: Path) -> None:
+    """Keep COUNT_FREQ_MODES=7 and map RTTY to FSK only as internal fallback."""
     path = root / "src" / "HvTxW" / "HvRadioNetW" / "radionetw.cpp"
     text = read(path)
     fn = "void RadioAndNetW::SetModeForFreqFromMode(int i)"
@@ -110,18 +39,101 @@ def patch_frequency_mode_mapping(root: Path) -> None:
     body = text[start:end]
     anchor = '    QString mode = "UNKNOWN";'
     if body.count(anchor) != 1:
-        raise RuntimeError(f"{path}: RTTY frequency-mode insertion anchor not unique")
-    body = body.replace(anchor, '    if (i==19) i=7;//WaveStation RTTY frequency profile\n' + anchor, 1)
+        raise RuntimeError(f"{path}: RTTY frequency fallback anchor not unique")
+    body = body.replace(
+        anchor,
+        '    if (i==19) i=1;//WaveStation RTTY: safe fallback to existing FSK settings slot\n' + anchor,
+        1,
+    )
     text = text[:start] + body + text[end:]
     write(path, text)
 
 
-def patch_station_call(root: Path) -> None:
+def patch_rtty_runtime_presets(root: Path) -> None:
+    """Apply RTTY dial presets from Main_Ms without altering saved settings format."""
+    h = root / "src" / "main_ms.h"
+    text = read(h)
+    text = replace_one(
+        text,
+        "    void RttyTxFinished();",
+        "    void RttyTxFinished();\n    void RttyModeActive(bool);",
+        str(h),
+    )
+    write(h, text)
+
     path = root / "src" / "main_ms.cpp"
     text = read(path)
-    old = "    TRtty = new HvRttyWidget(this);"
-    new = old + "\n    TRtty->SetStationCall(THvTxW->getMy_Call()); // use station identity configured in MSHV"
-    text = replace_one(text, old, new, str(path))
+
+    # Do not read getMy_Call() during application construction. MSHV populates
+    # its macro/settings data later in startup. Resolve it only when RTTY is
+    # actually activated by the operator.
+    text = replace_one(
+        text,
+        "    connect(rb_mode[19], SIGNAL(toggled(bool)), TRtty, SLOT(SetActive(bool))); // MSHV-RTTY",
+        "    connect(rb_mode[19], SIGNAL(toggled(bool)), this, SLOT(RttyModeActive(bool))); // WaveStation RTTY lazy activation",
+        str(path),
+    )
+
+    anchor = "void Main_Ms::RttySend(QString text)"
+    helper = r'''static QString WaveStationRttyPresetHz(int bandIndex)
+{
+    // Dial-frequency starting points for common RTTY activity. These are
+    // presets, not exclusive channels; the operator may retune at any time.
+    switch (bandIndex)
+    {
+        case 3:  return "1840000";   // 160 m
+        case 4:  return "3580000";   // 80 m
+        case 6:  return "7080000";   // 40 m
+        case 7:  return "10140000";  // 30 m
+        case 8:  return "14080000";  // 20 m
+        case 9:  return "18100000";  // 17 m
+        case 10: return "21080000";  // 15 m
+        case 11: return "24920000";  // 12 m
+        case 13: return "28080000";  // 10 m
+        case 15: return "50300000";  // 6 m
+        default: return QString();
+    }
+}
+void Main_Ms::RttyModeActive(bool on)
+{
+    if (!TRtty) return;
+    if (on)
+    {
+        // Resolve the station call only after normal MSHV settings/macros have
+        // finished loading. This avoids startup access to an unpopulated list.
+        QString call = THvTxW->getMy_Call().trimmed();
+        if (!call.isEmpty()) TRtty->SetStationCall(call);
+
+        // If RTTY is selected after the band, immediately tune that band's
+        // RTTY preset using MSHV's normal frequency/CAT path (id 3 = force
+        // frequency, do not change rig mode).
+        for (int i=0; i<COUNT_BANDS; ++i)
+        {
+            if (ListBands.at(i)->isChecked())
+            {
+                QString f = WaveStationRttyPresetHz(i);
+                if (!f.isEmpty()) THvTxW->SetDefFreqGlobal(3,f);
+                break;
+            }
+        }
+    }
+    TRtty->SetActive(on);
+}
+'''
+    text = replace_one(text, anchor, helper + "\n" + anchor, str(path))
+
+    band_anchor = "            THvTxW->SetBand(temp_band,s_id_set_to_rig);//0<-from App 1<-from Rig\n            RefreshWindowTitle();"
+    band_repl = r'''            THvTxW->SetBand(temp_band,s_id_set_to_rig);//0<-from App 1<-from Rig
+            // RTTY has its own compatibility-safe band presets. Do not add an
+            // eighth entry to MSHV's persisted frequency table: older settings
+            // contain seven entries and must remain readable at startup.
+            if (s_mode==19 && s_id_set_to_rig==0)
+            {
+                QString rtty_f = WaveStationRttyPresetHz(i);
+                if (!rtty_f.isEmpty()) THvTxW->SetDefFreqGlobal(3,rtty_f);
+            }
+            RefreshWindowTitle();'''
+    text = replace_one(text, band_anchor, band_repl, str(path))
     write(path, text)
 
 
@@ -132,10 +144,11 @@ def main() -> None:
     root = Path(args.source).resolve()
     if not (root / "MSHV_WIN64.pro").exists():
         raise SystemExit(f"Not a WaveStation/MSHV source tree: {root}")
-    patch_frequency_table(root)
-    patch_frequency_mode_mapping(root)
-    patch_station_call(root)
-    print("RTTY presets applied:", root)
+
+    # Deliberately DO NOT modify config_band_all.h / COUNT_FREQ_MODES.
+    patch_frequency_mode_fallback(root)
+    patch_rtty_runtime_presets(root)
+    print("RTTY compatibility-safe presets applied:", root)
 
 
 if __name__ == "__main__":
