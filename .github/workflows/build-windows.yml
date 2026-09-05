@@ -65,6 +65,12 @@ jobs:
           & "$env:pythonLocation\python.exe" tools/apply_mshv_rtty.py --source "$env:MSHV_SOURCE" --output "$PWD\work\WaveStation-src" --package-root "$PWD"
           if ($LASTEXITCODE -ne 0) { throw "integration patch failed with exit code $LASTEXITCODE" }
 
+      - name: Apply RTTY operating presets
+        shell: pwsh
+        run: |
+          & "$env:pythonLocation\python.exe" tools/apply_rtty_presets.py --source "$PWD\work\WaveStation-src"
+          if ($LASTEXITCODE -ne 0) { throw "RTTY preset patch failed with exit code $LASTEXITCODE" }
+
       - name: Run standalone RTTY modem tests
         shell: pwsh
         run: |
