@@ -53,7 +53,7 @@ def patch_frequency_table(root: Path) -> None:
     # IARU-R2 digital/all-mode segments. Bands without a broadly established
     # RTTY watering hole inherit MSHV's existing FSK-family default.
     rtty = {
-        3: "1.840.000",   # 160 m - very low RTTY activity; Region-2 DM segment
+        3: "1.840.000",   # 160 m - very low RTTY activity
         4: "3.580.000",   # 80 m
         6: "7.080.000",   # 40 m - common Region-2/Americas RTTY activity
         7: "10.140.000",  # 30 m
@@ -78,7 +78,10 @@ def patch_frequency_table(root: Path) -> None:
     output = []
     for line in section.splitlines(True):
         values = re.findall(r'"([^"]+)"', line)
-        if len(values) == 7 and "{" in line and "}" in line:
+        # The upstream file retains one commented-out legacy 143 MHz row.
+        # Never let commented examples affect the active-band index mapping.
+        active_row = not line.lstrip().startswith("//")
+        if active_row and len(values) == 7 and "{" in line and "}" in line:
             default = rtty.get(rows, values[1])
             close = line.rfind("}")
             if close < 0:
@@ -88,7 +91,7 @@ def patch_frequency_table(root: Path) -> None:
         output.append(line)
 
     if rows != 33:
-        raise RuntimeError(f"{path}: expected 33 band rows, patched {rows}")
+        raise RuntimeError(f"{path}: expected 33 active band rows, patched {rows}")
 
     text = text[:start] + "".join(output) + text[end:]
     write(path, text)
