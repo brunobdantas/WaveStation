@@ -17,7 +17,7 @@ HvRttyWidget::HvRttyWidget(QWidget *parent)
       audioTimer_(0), lastAudioMs_(-1)
 {
     setWindowTitle("WaveStation RTTY");
-    resize(840, 520);
+    resize(920, 540);
     setModal(false);
 
     baud_ = new QDoubleSpinBox(this);
@@ -54,11 +54,20 @@ HvRttyWidget::HvRttyWidget(QWidget *parent)
     abortBtn_ = new QPushButton("ABORT", this);
     QPushButton *clear = new QPushButton("Clear RX", this);
     QPushButton *cq = new QPushButton("F1 CQ", this);
-    QPushButton *ex = new QPushButton("F2 599 001", this);
-    QPushButton *tu = new QPushButton("F3 TU", this);
+    QPushButton *rst = new QPushButton("F2 RST", this);
+    QPushButton *info = new QPushButton("F3 INFO", this);
+    QPushButton *roger = new QPushButton("F4 R", this);
+    QPushButton *bye = new QPushButton("F5 73", this);
+
+    cq->setToolTip("General RTTY CQ - non contest");
+    rst->setToolTip("Send a normal 599 report");
+    info->setToolTip("Normal QSO information / copy check");
+    roger->setToolTip("Acknowledge good copy");
+    bye->setToolTip("Close the QSO with 73");
 
     QHBoxLayout *mac = new QHBoxLayout;
-    mac->addWidget(cq); mac->addWidget(ex); mac->addWidget(tu); mac->addStretch(); mac->addWidget(clear);
+    mac->addWidget(cq); mac->addWidget(rst); mac->addWidget(info); mac->addWidget(roger); mac->addWidget(bye);
+    mac->addStretch(); mac->addWidget(clear);
     QHBoxLayout *tx = new QHBoxLayout;
     tx->addWidget(txEdit_, 1); tx->addWidget(sendBtn_); tx->addWidget(abortBtn_);
 
@@ -75,8 +84,10 @@ HvRttyWidget::HvRttyWidget(QWidget *parent)
     connect(abortBtn_, SIGNAL(clicked()), this, SLOT(AbortClicked()));
     connect(clear, SIGNAL(clicked()), this, SLOT(ClearClicked()));
     connect(cq, SIGNAL(clicked()), this, SLOT(MacroCq()));
-    connect(ex, SIGNAL(clicked()), this, SLOT(MacroExch()));
-    connect(tu, SIGNAL(clicked()), this, SLOT(MacroTu()));
+    connect(rst, SIGNAL(clicked()), this, SLOT(MacroReport()));
+    connect(info, SIGNAL(clicked()), this, SLOT(MacroInfo()));
+    connect(roger, SIGNAL(clicked()), this, SLOT(MacroRoger()));
+    connect(bye, SIGNAL(clicked()), this, SLOT(Macro73()));
     connect(txEdit_, SIGNAL(returnPressed()), this, SLOT(SendClicked()));
 
     audioClock_.start();
@@ -90,6 +101,17 @@ HvRttyWidget::HvRttyWidget(QWidget *parent)
 }
 
 HvRttyWidget::~HvRttyWidget() { DestroyDecoders(); }
+
+QString HvRttyWidget::StationCall() const
+{
+    QString c = myCall_.trimmed().toUpper();
+    return c.isEmpty() ? QString("MYCALL") : c;
+}
+
+void HvRttyWidget::SetStationCall(QString call)
+{
+    myCall_ = call.trimmed().toUpper();
+}
 
 mshv_rtty::Config HvRttyWidget::CurrentConfig(double markHz) const
 {
@@ -258,6 +280,29 @@ void HvRttyWidget::SendClicked()
 void HvRttyWidget::AbortClicked() { emit AbortRequested(); SetTxFinished(); }
 void HvRttyWidget::SetTxFinished() { stateLabel_->setText("RX / RTTY ACTIVE"); sendBtn_->setEnabled(true); }
 void HvRttyWidget::ClearClicked() { rxText_->clear(); mainBuffer_.clear(); }
-void HvRttyWidget::MacroCq() { txEdit_->setText("CQ CQ PU2BRU PU2BRU CQ"); }
-void HvRttyWidget::MacroExch() { txEdit_->setText("599 001 001"); }
-void HvRttyWidget::MacroTu() { txEdit_->setText("TU PU2BRU CQ"); }
+
+void HvRttyWidget::MacroCq()
+{
+    QString c=StationCall();
+    txEdit_->setText(QString("CQ CQ CQ DE %1 %1 %1 K").arg(c));
+}
+void HvRttyWidget::MacroReport()
+{
+    QString c=StationCall();
+    txEdit_->setText(QString("UR RST 599 599 599 HW COPY? DE %1 K").arg(c));
+}
+void HvRttyWidget::MacroInfo()
+{
+    QString c=StationCall();
+    txEdit_->setText(QString("TNX FER CALL. RTTY 45 BAUD 170 SHIFT. HW COPY? DE %1 K").arg(c));
+}
+void HvRttyWidget::MacroRoger()
+{
+    QString c=StationCall();
+    txEdit_->setText(QString("R R ALL COPY. TNX FER INFO. DE %1 K").arg(c));
+}
+void HvRttyWidget::Macro73()
+{
+    QString c=StationCall();
+    txEdit_->setText(QString("TNX FER QSO. 73 73 DE %1 SK").arg(c));
+}
