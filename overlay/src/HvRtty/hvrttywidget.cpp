@@ -8,10 +8,13 @@
 #include <QFontDatabase>
 #include <QScrollBar>
 #include <QRegExp>
+#include <QMutexLocker>
 #include <cmath>
+#include <algorithm>
 
 HvRttyWidget::HvRttyWidget(QWidget *parent)
-    : QDialog(parent), active_(false), mainDecoder_(0)
+    : QDialog(parent), active_(false), mainDecoder_(0), pendingPeak_(0),
+      audioTimer_(0), lastAudioMs_(-1)
 {
     setWindowTitle("WaveStation RTTY");
     resize(840, 520);
@@ -29,12 +32,15 @@ HvRttyWidget::HvRttyWidget(QWidget *parent)
     multi_->setToolTip("Parallel decoder bank across the audio passband. Leave off on slow PCs.");
     spaceLabel_ = new QLabel(this);
     stateLabel_ = new QLabel("RX", this);
+    audioLevelLabel_ = new QLabel("Audio: waiting", this);
+    audioLevelLabel_->setMinimumWidth(125);
 
     QHBoxLayout *cfg = new QHBoxLayout;
     cfg->addWidget(new QLabel("Mark:", this)); cfg->addWidget(mark_);
     cfg->addWidget(new QLabel("Shift:", this)); cfg->addWidget(shift_);
     cfg->addWidget(baud_); cfg->addWidget(reverse_); cfg->addWidget(multi_);
-    cfg->addWidget(spaceLabel_); cfg->addStretch(); cfg->addWidget(stateLabel_);
+    cfg->addWidget(spaceLabel_); cfg->addStretch();
+    cfg->addWidget(audioLevelLabel_); cfg->addWidget(stateLabel_);
 
     rxText_ = new QTextEdit(this);
     rxText_->setReadOnly(true);
@@ -72,6 +78,12 @@ HvRttyWidget::HvRttyWidget(QWidget *parent)
     connect(ex, SIGNAL(clicked()), this, SLOT(MacroExch()));
     connect(tu, SIGNAL(clicked()), this, SLOT(MacroTu()));
     connect(txEdit_, SIGNAL(returnPressed()), this, SLOT(SendClicked()));
+
+    audioClock_.start();
+    audioTimer_ = new QTimer(this);
+    audioTimer_->setInterval(40);
+    connect(audioTimer_, SIGNAL(timeout()), this, SLOT(ProcessPendingAudio()));
+    audioTimer_->start();
 
     RebuildDecoders();
     hide();
@@ -151,22 +163,83 @@ void HvRttyWidget::Consume(QString &buffer, const std::string &text, double mark
 
 void HvRttyWidget::FeedAudio(int *samples, int count)
 {
-    if (!active_ || !samples || count<=0 || !mainDecoder_) return;
-    std::string s = mainDecoder_->push(samples,count);
-    if (!s.empty()) Consume(mainBuffer_,s,mark_->value(),false);
-    if (!multi_->isChecked()) return;
-    for (int i=0;i<lanes_.size();++i) {
-        Lane *l=lanes_[i];
-        std::string m=l->decoder->push(samples,count);
-        if (!m.empty()) Consume(l->buffer,m,l->mark,true);
+    if (!active_ || !samples || count<=0) return;
+
+    // This function is deliberately limited to a bounded memory copy. It is
+    // called on MSHV's live audio path, therefore running trig/DSP or touching
+    // Qt widgets here can stall the original waterfall and decoder pipeline.
+    QMutexLocker locker(&audioMutex_);
+
+    const int maxQueued = 24000; // at most two seconds at the 12 kHz MSHV stream
+    int incoming = std::min(count, maxQueued);
+    int start = count - incoming;
+    int needDrop = pendingAudio_.size() + incoming - maxQueued;
+    if (needDrop > 0) pendingAudio_.remove(0, std::min(needDrop, pendingAudio_.size()));
+
+    for (int i=start; i<count; ++i) {
+        int v = samples[i];
+        pendingAudio_.append(v);
+        int a = (v == -2147483647-1) ? 2147483647 : std::abs(v);
+        if (a > pendingPeak_) pendingPeak_ = a;
+    }
+    lastAudioMs_ = audioClock_.elapsed();
+}
+
+void HvRttyWidget::ProcessPendingAudio()
+{
+    if (!active_) return;
+
+    QVector<int> audio;
+    int peak = 0;
+    qint64 last = -1;
+    {
+        QMutexLocker locker(&audioMutex_);
+        if (!pendingAudio_.isEmpty()) audio.swap(pendingAudio_);
+        peak = pendingPeak_;
+        pendingPeak_ = 0;
+        last = lastAudioMs_;
+    }
+
+    if (!audio.isEmpty() && mainDecoder_) {
+        std::string s = mainDecoder_->push(audio.constData(), audio.size());
+        if (!s.empty()) Consume(mainBuffer_,s,mark_->value(),false);
+
+        if (multi_->isChecked()) {
+            for (int i=0;i<lanes_.size();++i) {
+                Lane *l=lanes_[i];
+                std::string m=l->decoder->push(audio.constData(),audio.size());
+                if (!m.empty()) Consume(l->buffer,m,l->mark,true);
+            }
+        }
+    }
+
+    if (peak > 0) {
+        const double full = 8388607.0;
+        double db = 20.0 * std::log10(std::max(1.0, (double)peak) / full);
+        if (db > 0.0) db = 0.0;
+        if (db < -99.0) db = -99.0;
+        audioLevelLabel_->setText(QString("Audio: %1 dBFS").arg(db,0,'f',1));
+    } else if (last < 0 || audioClock_.elapsed() - last > 800) {
+        audioLevelLabel_->setText("Audio: NO INPUT");
     }
 }
 
 void HvRttyWidget::SetActive(bool on)
 {
     active_=on;
-    if (on) { show(); raise(); activateWindow(); stateLabel_->setText("RX / RTTY ACTIVE"); }
-    else { stateLabel_->setText("RX"); hide(); }
+    if (on) {
+        {
+            QMutexLocker locker(&audioMutex_);
+            pendingAudio_.clear(); pendingPeak_=0; lastAudioMs_=-1;
+        }
+        audioLevelLabel_->setText("Audio: waiting");
+        show(); raise(); activateWindow(); stateLabel_->setText("RX / RTTY ACTIVE");
+    }
+    else {
+        stateLabel_->setText("RX"); hide();
+        QMutexLocker locker(&audioMutex_);
+        pendingAudio_.clear(); pendingPeak_=0; lastAudioMs_=-1;
+    }
 }
 
 void HvRttyWidget::SetMarkFrequency(double hz)
