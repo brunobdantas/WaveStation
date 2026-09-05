@@ -1,0 +1,110 @@
+name: Build WaveStation Windows
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/build-windows.yml'
+      - 'overlay/**'
+      - 'tools/**'
+      - 'tests/**'
+      - 'SOURCE_REVISION.txt'
+      - 'THIRD_PARTY_NOTICES.md'
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows:
+    runs-on: windows-2022
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout WaveStation
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Qt 5.12.12 and MinGW 7.3 x64
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '5.12.12'
+          host: 'windows'
+          target: 'desktop'
+          arch: 'win64_mingw73'
+          cache: true
+          tools: 'tools_mingw,qt.tools.win64_mingw730'
+
+      - name: Verify toolchain
+        shell: pwsh
+        run: |
+          qmake -v
+          g++ --version
+          mingw32-make --version
+
+      - name: Download pinned MSHV source
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force -Path work | Out-Null
+          $zip = Join-Path $PWD 'work\mshv.zip'
+          Invoke-WebRequest -Uri 'https://github.com/LZ2HV/MSHV/archive/8f93eb3e25056f0cb18699ef6c3bef3998c52cdf.zip' -OutFile $zip
+          Expand-Archive -Path $zip -DestinationPath 'work' -Force
+          $src = Get-ChildItem 'work' -Directory | Where-Object { $_.Name -like 'MSHV-*' } | Select-Object -First 1
+          if (-not $src) { throw 'Pinned MSHV source was not extracted.' }
+          "MSHV_SOURCE=$($src.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Apply WaveStation RTTY integration
+        shell: pwsh
+        run: |
+          python tools/apply_mshv_rtty.py --source "$env:MSHV_SOURCE" --output "$PWD\work\WaveStation-src" --package-root "$PWD"
+
+      - name: Run standalone RTTY modem tests
+        shell: pwsh
+        run: |
+          g++ -std=gnu++11 -Wall -Wextra -O2 tests/test_rtty.cpp overlay/src/HvRtty/rtty_core.cpp -o work/rtty_test.exe
+          & .\work\rtty_test.exe
+          if ($LASTEXITCODE -ne 0) { throw "RTTY modem test failed with exit code $LASTEXITCODE" }
+
+      - name: Build WaveStation
+        shell: pwsh
+        working-directory: work/WaveStation-src
+        run: |
+          qmake MSHV_WIN64.pro CONFIG+=release
+          if ($LASTEXITCODE -ne 0) { throw "qmake failed with exit code $LASTEXITCODE" }
+          mingw32-make -j2
+          if ($LASTEXITCODE -ne 0) { throw "build failed with exit code $LASTEXITCODE" }
+
+      - name: Package Windows application
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dist = Join-Path $PWD 'dist'
+          New-Item -ItemType Directory -Force -Path $dist | Out-Null
+          $exe = Get-ChildItem "$PWD\work\WaveStation-src\bin" -Filter '*.exe' | Select-Object -First 1
+          if (-not $exe) { throw 'No Windows executable found under build bin directory.' }
+          $target = Join-Path $dist 'WaveStation.exe'
+          Copy-Item $exe.FullName $target -Force
+          $deploy = Get-Command windeployqt.exe -ErrorAction SilentlyContinue
+          if ($deploy) {
+            & $deploy.Source --release --no-translations $target
+            if ($LASTEXITCODE -ne 0) { throw "windeployqt failed with exit code $LASTEXITCODE" }
+          }
+          Copy-Item README.md $dist -Force
+          Copy-Item SOURCE_REVISION.txt $dist -Force
+          Copy-Item THIRD_PARTY_NOTICES.md $dist -Force
+          $hash = (Get-FileHash $target -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  WaveStation.exe" | Set-Content -Encoding ascii (Join-Path $dist 'SHA256SUMS.txt')
+          Get-ChildItem $dist -Recurse | Format-Table FullName, Length
+
+      - name: Upload WaveStation artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: WaveStation-Windows-x64
+          path: dist/**
+          if-no-files-found: error
+          retention-days: 14
