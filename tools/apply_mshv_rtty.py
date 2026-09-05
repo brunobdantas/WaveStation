@@ -31,8 +31,8 @@ def copy_overlay(root: Path, out: Path):
 
 def patch(out: Path, root: Path):
     p=out/'src/config.h'
-    one(p,'#define APP_NAME "MSHV version " VER_MS " 64-bit"// r002 For Test',
-          '#define APP_NAME "WaveStation alpha " VER_MS " 64-bit"// WaveStation experimental build')
+    one(p,'#define APP_NAME \"MSHV version \" VER_MS \" 64-bit\"// r002 For Test',
+          '#define APP_NAME \"WaveStation alpha \" VER_MS \" 64-bit\"// WaveStation experimental build')
 
     p=out/'src/config_str_all.h'
     one(p,'#define COUNT_MODE 19','#define COUNT_MODE 20')
@@ -107,7 +107,7 @@ def patch(out: Path, root: Path):
 
     # Do not invoke period decoding for asynchronous RTTY.
     anchor='    if (s_mode==10)//pi4 rx\n'
-    one(p,anchor,'    if (s_mode==19)\n    {\n        // RTTY decoder consumes the live 12 kHz stream continuously.\n    }\n    else '+anchor>lstrip())
+    one(p,anchor,'    if (s_mode==19)\n    {\n        // RTTY decoder consumes the live 12 kHz stream continuously.\n    }\n    else '+anchor.lstrip())
 
     # Rig-control frequency-offset behavior should match other soundcard digital modes.
     p=out/'src/HvRigControl/hvrigcontrol.cpp'
