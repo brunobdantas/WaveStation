@@ -1,4 +1,4 @@
-name: MSHV Enhanced Foundation CI
+name: Build MSHV Enhanced Windows
 
 on:
   workflow_dispatch:
@@ -7,50 +7,186 @@ on:
     paths:
       - '.github/workflows/build-windows.yml'
       - 'tools/**'
-      - 'src/**'
+      - 'src/enhanced/**'
       - 'SOURCE_REVISION.txt'
       - 'README.md'
+      - 'THIRD_PARTY_NOTICES.md'
 
 permissions:
   contents: read
 
+concurrency:
+  group: mshv-enhanced-windows-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  validate-foundation:
+  build-windows:
     runs-on: windows-2022
+    timeout-minutes: 50
+
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: Checkout MSHV Enhanced
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
           python-version: '3.12'
 
-      - name: Validate MSHV Enhanced patcher
-        shell: pwsh
-        run: |
-          python -m py_compile tools/apply_mshv_enhanced.py
-          if ($LASTEXITCODE -ne 0) { throw 'Patcher syntax failed' }
-
-      - name: Verify pinned upstream
+      - name: Fetch pinned official MSHV 2.76.8 rc008
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           $sha = '50ea1a7b5bf20c688ccc72107e389f06673deac6'
           git clone --filter=blob:none --no-checkout https://github.com/LZ2HV/MSHV.git upstream
+          if ($LASTEXITCODE -ne 0) { throw 'MSHV clone failed' }
           git -C upstream fetch origin $sha
+          if ($LASTEXITCODE -ne 0) { throw 'MSHV pinned fetch failed' }
           git -C upstream checkout $sha
+          if ($LASTEXITCODE -ne 0) { throw 'MSHV pinned checkout failed' }
           $actual = (git -C upstream rev-parse HEAD).Trim()
-          if ($actual -ne $sha) { throw "Unexpected upstream: $actual" }
-          Write-Host "MSHV 2.76.8 rc008 verified: $actual"
+          if ($actual -ne $sha) { throw "Unexpected upstream revision: $actual" }
+          Write-Host "Verified upstream MSHV 2.76.8 rc008: $actual"
 
-      - name: Apply MSHV Enhanced patch to 2.76.8
+      - name: Apply MSHV Enhanced integration
         shell: pwsh
         run: |
+          python -m py_compile tools/apply_mshv_enhanced.py
+          if ($LASTEXITCODE -ne 0) { throw 'Patcher syntax validation failed' }
           python tools/apply_mshv_enhanced.py upstream
-          if ($LASTEXITCODE -ne 0) { throw 'MSHV Enhanced patch is not compatible with pinned upstream' }
+          if ($LASTEXITCODE -ne 0) { throw 'MSHV Enhanced patch failed' }
           git -C upstream diff --check
-          if ($LASTEXITCODE -ne 0) { throw 'Patched upstream diff check failed' }
+          if ($LASTEXITCODE -ne 0) { throw 'Patched source diff check failed' }
           git -C upstream diff --stat
 
-      - name: Report foundation status
+      - name: Install Qt 5.15.2 and MinGW x64
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '5.15.2'
+          host: 'windows'
+          target: 'desktop'
+          arch: 'win64_mingw81'
+          tools: 'tools_mingw,qt.tools.win64_mingw810'
+          cache: true
+
+      - name: Resolve build tools
+        id: tools
         shell: pwsh
         run: |
-          Write-Host 'MSHV Enhanced patch applies cleanly to MSHV 2.76.8 rc008.'
+          $qmake = (Get-Command qmake.exe -ErrorAction Stop).Source
+          $make = (Get-Command mingw32-make.exe -ErrorAction Stop).Source
+          $windeployqt = (Get-Command windeployqt.exe -ErrorAction Stop).Source
+          "qmake=$qmake" >> $env:GITHUB_OUTPUT
+          "make=$make" >> $env:GITHUB_OUTPUT
+          "windeployqt=$windeployqt" >> $env:GITHUB_OUTPUT
+          qmake -v
+          g++ --version
+          mingw32-make --version
+
+      - name: Compile MSHV Enhanced x64
+        shell: pwsh
+        working-directory: upstream
+        run: |
+          & '${{ steps.tools.outputs.qmake }}' MSHV_WIN64.pro 'CONFIG+=release'
+          if ($LASTEXITCODE -ne 0) { throw "qmake failed with exit code $LASTEXITCODE" }
+          & '${{ steps.tools.outputs.make }}' -j2
+          if ($LASTEXITCODE -ne 0) { throw "compile failed with exit code $LASTEXITCODE" }
+          if (-not (Test-Path 'bin/MSHV-Enhanced.exe')) { throw 'MSHV-Enhanced.exe was not produced' }
+
+      - name: Stage portable Windows runtime
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dist = Join-Path $PWD 'dist'
+          if (Test-Path $dist) { Remove-Item -Recurse -Force $dist }
+          New-Item -ItemType Directory -Force $dist | Out-Null
+          Copy-Item 'upstream/bin/*' $dist -Recurse -Force
+
+          # Never ship an upstream/sample operator log.
+          New-Item -ItemType Directory -Force "$dist/log" | Out-Null
+          $adi = @(
+            'MSHV Enhanced 0.1.0 ADIF Log',
+            '<ADIF_VER:5>3.1.0',
+            '<PROGRAMID:13>MSHV Enhanced',
+            '<PROGRAMVERSION:5>0.1.0',
+            '<EOH>'
+          ) -join "`r`n"
+          Set-Content -Path "$dist/log/mshvlog.adi" -Value $adi -Encoding ascii
+          Set-Content -Path "$dist/log/mshvlog.edim" -Value '[QSORecords; MSHV Enhanced LOG FILE]' -Encoding ascii
+
+          # Deploy the exact Qt runtime required by the built binary.
+          & '${{ steps.tools.outputs.windeployqt }}' --release --no-translations "$dist/MSHV-Enhanced.exe"
+          if ($LASTEXITCODE -ne 0) { throw "windeployqt failed with exit code $LASTEXITCODE" }
+
+          Copy-Item 'upstream/COPYING.txt' "$dist/COPYING-MSHV-GPL3.txt" -Force
+          Copy-Item 'README.md' "$dist/README-MSHV-Enhanced.md" -Force
+          Copy-Item 'SOURCE_REVISION.txt' "$dist/SOURCE_REVISION.txt" -Force
+          Copy-Item 'THIRD_PARTY_NOTICES.md' "$dist/THIRD_PARTY_NOTICES.md" -Force
+
+          @"
+          MSHV Enhanced 0.1.0
+          Upstream: LZ2HV/MSHV
+          Upstream revision: 50ea1a7b5bf20c688ccc72107e389f06673deac6
+          Upstream version: MSHV 2.76.8 rc008
+          Enhanced features: AutoQSO + HRDLog + WRL; native MSHV Club Log retained
+          Derived work license: GPL-3.0
+          "@ | Set-Content "$dist/BUILD-INFO.txt" -Encoding UTF8
+
+          $exeHash = (Get-FileHash "$dist/MSHV-Enhanced.exe" -Algorithm SHA256).Hash
+          "$exeHash  MSHV-Enhanced.exe" | Set-Content "$dist/SHA256SUMS.txt" -Encoding ascii
+
+      - name: Windows startup smoke test
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dist = Join-Path $PWD 'dist'
+          $exe = Join-Path $dist 'MSHV-Enhanced.exe'
+          $p = Start-Process -FilePath $exe -WorkingDirectory $dist -PassThru
+          Start-Sleep -Seconds 10
+          $p.Refresh()
+          if ($p.HasExited) {
+            throw "MSHV Enhanced exited during startup (code $($p.ExitCode))"
+          }
+          Stop-Process -Id $p.Id -Force
+          Write-Host 'MSHV Enhanced startup smoke test passed.'
+
+      - name: Export corresponding GPL source
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force source-package | Out-Null
+          Copy-Item 'src/enhanced' 'source-package/enhanced' -Recurse -Force
+          Copy-Item 'tools/apply_mshv_enhanced.py' 'source-package/apply_mshv_enhanced.py' -Force
+          Copy-Item 'README.md' 'source-package/README.md' -Force
+          Copy-Item 'SOURCE_REVISION.txt' 'source-package/SOURCE_REVISION.txt' -Force
+          Copy-Item 'THIRD_PARTY_NOTICES.md' 'source-package/THIRD_PARTY_NOTICES.md' -Force
+          Copy-Item 'upstream/COPYING.txt' 'source-package/COPYING-MSHV-GPL3.txt' -Force
+          cmd /c "git -C upstream diff --binary > source-package\MSHV-Enhanced-0.1.0.patch"
+          if ($LASTEXITCODE -ne 0) { throw 'Failed to export source patch' }
+          tar.exe -a -c -f 'MSHV-Enhanced-0.1.0-Source.zip' -C source-package .
+          if ($LASTEXITCODE -ne 0) { throw 'Source archive creation failed' }
+
+      - name: Create Windows portable archive and hashes
+        shell: pwsh
+        run: |
+          tar.exe -a -c -f 'MSHV-Enhanced-0.1.0-Windows-x64.zip' -C dist .
+          if ($LASTEXITCODE -ne 0) { throw 'Windows ZIP creation failed' }
+
+          $win = (Get-FileHash 'MSHV-Enhanced-0.1.0-Windows-x64.zip' -Algorithm SHA256).Hash
+          $src = (Get-FileHash 'MSHV-Enhanced-0.1.0-Source.zip' -Algorithm SHA256).Hash
+          @(
+            "$win  MSHV-Enhanced-0.1.0-Windows-x64.zip",
+            "$src  MSHV-Enhanced-0.1.0-Source.zip"
+          ) | Set-Content 'MSHV-Enhanced-0.1.0-SHA256.txt' -Encoding ascii
+
+      - name: Upload MSHV Enhanced artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MSHV-Enhanced-0.1.0-Windows-x64
+          path: |
+            dist/**
+            MSHV-Enhanced-0.1.0-Windows-x64.zip
+            MSHV-Enhanced-0.1.0-Source.zip
+            MSHV-Enhanced-0.1.0-SHA256.txt
+          if-no-files-found: error
+          retention-days: 30
