@@ -283,11 +283,18 @@ void Main_Ms::StopTxGlobal()
         "unconditional ADIF on completed QSO",
     )
 
-    manual_adif_emit = "    if (s_udportcp_broad_logged_adif) emit EmitAdifRecord(MakeAdifString(rowt));\n"
+    manual_adif_emit = (
+        "    if (s_udportcp_broad_logged_adif) emit EmitAdifRecord(MakeAdifString(rowt));\\n"
+        "\\n"
+        "    if (s_allowed_modes && (f_isCheck[0] || f_isCheck[3])) GetMarkTextAllFromLog_p(s_band,s_mode);\\n"
+    )
     replace_once(
         log_cpp,
         manual_adif_emit,
-        manual_adif_emit + "    emit EmitEnhancedAdif(MakeAdifString(rowt));\n",
+        "    if (s_udportcp_broad_logged_adif) emit EmitAdifRecord(MakeAdifString(rowt));\\n"
+        "    emit EmitEnhancedAdif(MakeAdifString(rowt));\\n"
+        "\\n"
+        "    if (s_allowed_modes && (f_isCheck[0] || f_isCheck[3])) GetMarkTextAllFromLog_p(s_band,s_mode);\\n",
         "unconditional ADIF on manual QSO",
     )
 
