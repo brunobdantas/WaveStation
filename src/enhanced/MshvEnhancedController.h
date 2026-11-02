@@ -8,6 +8,7 @@
 #include <QSet>
 #include <QStringList>
 #include <QTimer>
+#include <QUrl>
 #include <QVector>
 
 class QCheckBox;
@@ -27,10 +28,6 @@ public:
     explicit MshvEnhancedController(const QString &appPath, QWidget *parent = nullptr);
     ~MshvEnhancedController() override;
 
-    void setStationIdentity(const QString &call, const QString &grid);
-    void setBand(const QString &band);
-    void setModeId(int modeId);
-
 signals:
     void selectHuntDecode(QString allText, QString selectedCall, QString time, QString txReport, QString freq);
     void selectAutoDecode(QStringList decode);
@@ -39,6 +36,9 @@ signals:
     void skipTx1Changed(bool enabled);
 
 public slots:
+    void setStationIdentity(const QString &call, const QString &grid);
+    void setBand(const QString &band);
+    void setModeId(int modeId);
     void onDecode(QStringList decode);
     void onLoggedQso(QStringList qso);
     void onAdifRecord(QString adif);
