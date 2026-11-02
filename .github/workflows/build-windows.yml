@@ -114,9 +114,37 @@ jobs:
           Set-Content -Path "$dist/log/mshvlog.adi" -Value $adi -Encoding ascii
           Set-Content -Path "$dist/log/mshvlog.edim" -Value '[QSORecords; MSHV Enhanced LOG FILE]' -Encoding ascii
 
-          # Deploy the exact Qt runtime required by the built binary.
-          & '${{ steps.tools.outputs.windeployqt }}' --release --no-translations "$dist/MSHV-Enhanced.exe"
-          if ($LASTEXITCODE -ne 0) { throw "windeployqt failed with exit code $LASTEXITCODE" }
+          # Deploy Qt/MinGW runtime explicitly. This is more deterministic on
+          # hosted Windows runners than windeployqt's plugin discovery.
+          $qtBin = Join-Path $env:QT_ROOT_DIR 'bin'
+          $qtPlugins = $env:QT_PLUGIN_PATH
+          $mingwBin = Split-Path -Parent '${{ steps.tools.outputs.make }}'
+
+          foreach ($dll in @('Qt5Core.dll','Qt5Gui.dll','Qt5Network.dll','Qt5WebSockets.dll','Qt5Widgets.dll')) {
+            $src = Join-Path $qtBin $dll
+            if (-not (Test-Path $src)) { throw "Required Qt runtime missing: $src" }
+            Copy-Item $src $dist -Force
+          }
+          foreach ($dll in @('libEGL.dll','libGLESv2.dll','d3dcompiler_47.dll','opengl32sw.dll','Qt5Svg.dll')) {
+            $src = Join-Path $qtBin $dll
+            if (Test-Path $src) { Copy-Item $src $dist -Force }
+          }
+
+          New-Item -ItemType Directory -Force "$dist/platforms" | Out-Null
+          $qwindows = Join-Path $qtPlugins 'platforms/qwindows.dll'
+          if (-not (Test-Path $qwindows)) { throw "Required Qt platform plugin missing: $qwindows" }
+          Copy-Item $qwindows "$dist/platforms/qwindows.dll" -Force
+
+          foreach ($pluginDir in @('styles','imageformats')) {
+            $srcDir = Join-Path $qtPlugins $pluginDir
+            if (Test-Path $srcDir) { Copy-Item $srcDir "$dist/$pluginDir" -Recurse -Force }
+          }
+
+          foreach ($dll in @('libgcc_s_seh-1.dll','libstdc++-6.dll','libwinpthread-1.dll')) {
+            $src = Join-Path $mingwBin $dll
+            if (-not (Test-Path $src)) { throw "Required MinGW runtime missing: $src" }
+            Copy-Item $src $dist -Force
+          }
 
           Copy-Item 'upstream/COPYING.txt' "$dist/COPYING-MSHV-GPL3.txt" -Force
           Copy-Item 'README.md' "$dist/README-MSHV-Enhanced.md" -Force
