@@ -2,16 +2,14 @@
 
 ## MSHV
 
-Base application: MSHV by Hrisimir Hristov, LZ2HV.  
-Source: https://github.com/LZ2HV/MSHV  
-License in upstream repository: GNU General Public License (GPL).
+Base application: MSHV by Hrisimir Hristov, LZ2HV.
 
-WaveStation does not modify or publish to the upstream MSHV repository. CI downloads a pinned source archive and creates a derived build tree inside the GitHub Actions runner.
+- Source: https://github.com/LZ2HV/MSHV
+- License: GNU General Public License v3
+- Pinned revision: `50ea1a7b5bf20c688ccc72107e389f06673deac6`
 
-## Diddle
+MSHV Enhanced is a modified/derived build and is not an official MSHV release.
 
-Reference project: Diddle by WW2DX contributors.  
-Source: https://github.com/WW2DX/diddle  
-License: MIT.
+## Online services
 
-WaveStation does not embed the Diddle Tauri/Rust application. RTTY DSP concepts such as ITA2/AFSK, mark-space correlation, asynchronous framing, and multi-decoder workflow were reimplemented in C++11 for integration with the existing Qt/audio/rig infrastructure.
+Optional integrations may communicate with services selected and configured by the operator, including Club Log, HRDLog.net and World Radio League. Credentials must never be committed to this repository.
