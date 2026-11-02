@@ -43,6 +43,7 @@ public slots:
     void onLoggedQso(QStringList qso);
     void onAdifRecord(QString adif);
     void onQsoProgress(int progress);
+    void onManualTarget(QString allText, QString selectedCall, QString time, QString txReport, QString freq);
 
 private slots:
     void toggleArm();
@@ -171,6 +172,7 @@ private:
     QDateTime activeStartedUtc_;
     QDateTime activeLastProgressUtc_;
     int activeProgress_ = 0;
+    bool manualOverride_ = false;
 
     QVector<CtyRecord> cty_;
     QVector<HistoryRow> history_;
