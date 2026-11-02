@@ -1,34 +1,36 @@
-# WaveStation
+# MSHV Enhanced
 
-WaveStation is an experimental Windows HAM-radio digital-mode build that adds a native RTTY modem to a pinned MSHV source revision while keeping the upstream repositories untouched.
+MSHV Enhanced is a GPL-3.0 derivative build of MSHV focused on advanced assisted/automatic FT8-family operation and modern logbook integrations.
 
-## Current RTTY scope
+## Upstream
 
-- Native C++11 / Qt implementation
-- ITA2 (Baudot) LTRS/FIGS encoding and decoding
-- 45.45 baud
-- 170 Hz AFSK shift
-- 1.5 stop bits
-- Mark/space quadrature correlation receiver
-- Continuous RX using the application's existing sound input
-- TX using the existing sound output and CAT/PTT path
-- Optional multi-frequency decoder bank
-- Dedicated RTTY console with RX/TX text and basic macros
+- Project: LZ2HV/MSHV
+- Pinned revision: `50ea1a7b5bf20c688ccc72107e389f06673deac6`
+- Upstream version: **MSHV 2.76.8 rc008**
+- Upstream date: 2026-10-23
 
-## Build model
+## Goals
 
-The repository stores only the WaveStation integration layer. CI downloads the pinned upstream MSHV source revision, applies the local integration patch, then compiles on a GitHub-hosted Windows runner using Qt/MinGW.
+- Advanced AutoQSO for FT8/FT4/FT2 with operator-controlled ARM/DISARM/HALT.
+- Native MSHV AutoSeq remains responsible for the exchange itself.
+- Target policies by callsign, DXCC, grid, CQ zone and ITU zone.
+- Skip Tx1 support and configurable retry/cooldown/watchdog behavior.
+- History-aware scoring by call, entity, band and mode.
+- Directed-call priority and busy-target detection.
+- Transparent candidate scoring and decision audit trail.
+- Preserve/extend MSHV's Club Log support and add HRDLog.net and World Radio League.
+- Reproducible Windows x64 CI build with Qt/MinGW.
 
-Pinned upstream revision:
+## Safety model
 
-`LZ2HV/MSHV@8f93eb3e25056f0cb18699ef6c3bef3998c52cdf` (MSHV 2.76.7 rc017)
+Automation is always explicitly armed by the operator. Loss of required station state must fail closed and stop automatic TX.
 
-The GitHub Actions artifact is expected to contain a deployable `WaveStation.exe` plus required Qt runtime files.
+## Legacy WaveStation
 
-## Status
+The previous RTTY-oriented project is preserved in branch:
 
-Experimental / alpha. RF transmission must first be tested at safe power or into a dummy load.
+`archive/wavestation-rtty-2026-11-02`
 
-## Licensing
+## License
 
-MSHV is GPL-licensed software. WaveStation modifications and integration code are distributed compatibly under GPLv3. See `THIRD_PARTY_NOTICES.md` and the upstream MSHV license for details.
+Derived from MSHV and distributed under GPL-3.0. See `THIRD_PARTY_NOTICES.md`.
