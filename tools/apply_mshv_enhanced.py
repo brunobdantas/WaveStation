@@ -275,13 +275,20 @@ void Main_Ms::StopTxGlobal()
         "unconditional Enhanced ADIF signal",
     )
 
-    adif_emit = "        if (s_udportcp_broad_logged_adif) emit EmitAdifRecord(MakeAdifString(rowt));\n"
-    replace_count(
+    normal_adif_emit = "        if (s_udportcp_broad_logged_adif) emit EmitAdifRecord(MakeAdifString(rowt));\n"
+    replace_once(
         log_cpp,
-        adif_emit,
-        adif_emit + "        emit EmitEnhancedAdif(MakeAdifString(rowt));\n",
-        2,
-        "unconditional ADIF on completed/manual QSO",
+        normal_adif_emit,
+        normal_adif_emit + "        emit EmitEnhancedAdif(MakeAdifString(rowt));\n",
+        "unconditional ADIF on completed QSO",
+    )
+
+    manual_adif_emit = "    if (s_udportcp_broad_logged_adif) emit EmitAdifRecord(MakeAdifString(rowt));\n"
+    replace_once(
+        log_cpp,
+        manual_adif_emit,
+        manual_adif_emit + "    emit EmitEnhancedAdif(MakeAdifString(rowt));\n",
+        "unconditional ADIF on manual QSO",
     )
 
     require_once(main_cpp, "    V_l->insertWidget(0, enhancedController);\n", "Enhanced panel layout")
