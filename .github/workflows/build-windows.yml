@@ -41,8 +41,16 @@ jobs:
           if ($actual -ne $sha) { throw "Unexpected upstream: $actual" }
           Write-Host "MSHV 2.76.8 rc008 verified: $actual"
 
+      - name: Apply MSHV Enhanced patch to 2.76.8
+        shell: pwsh
+        run: |
+          python tools/apply_mshv_enhanced.py upstream
+          if ($LASTEXITCODE -ne 0) { throw 'MSHV Enhanced patch is not compatible with pinned upstream' }
+          git -C upstream diff --check
+          if ($LASTEXITCODE -ne 0) { throw 'Patched upstream diff check failed' }
+          git -C upstream diff --stat
+
       - name: Report foundation status
         shell: pwsh
         run: |
-          Write-Host 'MSHV Enhanced foundation is valid.'
-          Write-Host 'Next build stage will compile the AutoQSO integration and online log clients.'
+          Write-Host 'MSHV Enhanced patch applies cleanly to MSHV 2.76.8 rc008.'
