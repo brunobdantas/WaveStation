@@ -520,6 +520,12 @@ void MshvEnhancedController::onDecode(QStringList decode)
         c.call = sender;
         c.directedToUs = (!myCall_.isEmpty() && recipient == normalizedCall(myCall_));
         c.busy = !c.directedToUs;
+        // A final 73/RR73 means the station is just becoming available. This
+        // makes the "call non-CQ stations" option useful without requiring
+        // "call busy stations".
+        const QString exchange = tokens.value(2);
+        if (!c.directedToUs && (exchange == "73" || exchange == "RR73"))
+            c.busy = false;
     } else {
         return;
     }
