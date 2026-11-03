@@ -32,6 +32,7 @@ signals:
     void selectHuntDecode(QString allText, QString selectedCall, QString time, QString txReport, QString freq);
     void selectAutoDecode(QStringList decode);
     void ensureAutoRequested();
+    void requestCq();
     void haltTxRequested();
     void skipTx1Changed(bool enabled);
 
