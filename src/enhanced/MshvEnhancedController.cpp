@@ -668,7 +668,10 @@ void MshvEnhancedController::decideNow()
     if (!armed_ || strategy_ == Answer || !activeCall_.isEmpty()) return;
 
     if (target_ == CallCq) {
-        if (fallbackCq_) emit ensureAutoRequested();
+        if (fallbackCq_) {
+            emit requestCq();
+            emit ensureAutoRequested();
+        }
         return;
     }
 
@@ -676,6 +679,7 @@ void MshvEnhancedController::decideNow()
     if (!candidates.isEmpty()) {
         selectCandidate(candidates.first());
     } else if (fallbackCq_) {
+        emit requestCq();
         emit ensureAutoRequested();
     }
     updateStatus();
@@ -706,13 +710,20 @@ void MshvEnhancedController::watchdogTick()
 {
     pruneStations();
 
-    if (!armed_ || activeCall_.isEmpty() || manualOverride_) return;
+    if (!armed_ || activeCall_.isEmpty()) return;
 
     const QDateTime now = QDateTime::currentDateTimeUtc();
     if (!activeStartedUtc_.isValid()) activeStartedUtc_ = now;
     if (!activeLastProgressUtc_.isValid()) activeLastProgressUtc_ = activeStartedUtc_;
 
     const int attemptSeconds = qMax(15, maxQsoSeconds_ / qMax(1, retryLimit_));
+
+    if (manualOverride_) {
+        if (activeLastProgressUtc_.secsTo(now) > maxQsoSeconds_) {
+            clearActive("manual target watchdog", false);
+        }
+        return;
+    }
 
     if (!activeEngaged_) {
         if (activeStartedUtc_.secsTo(now) < attemptSeconds) return;
@@ -1351,8 +1362,9 @@ void MshvEnhancedController::enqueueHrdLog(const QString &adif)
     QUrlQuery form;
     form.addQueryItem("Callsign", hrdCall_);
     form.addQueryItem("Code", hrdCode_);
-    form.addQueryItem("App", "MSHV Enhanced 0.1.0");
-    form.addQueryItem("ADIFData", adif);
+    form.addQueryItem("APP", "MSHV Enhanced 0.1.0");
+    form.addQueryItem("CMD", "INSERT");
+    form.addQueryItem("ADIFDATA", adif);
 
     UploadJob j;
     j.service = "hrdlog";
@@ -1365,6 +1377,7 @@ void MshvEnhancedController::enqueueHrdLog(const QString &adif)
 QJsonObject MshvEnhancedController::wrlJsonFromAdif(const QString &adif) const
 {
     QJsonObject o;
+    o.insert("programId", "MSHV Enhanced");
     const QString call = adifValue(adif, "CALL");
     const QString band = adifValue(adif, "BAND");
     QString mode = adifValue(adif, "SUBMODE");
@@ -1400,10 +1413,10 @@ QJsonObject MshvEnhancedController::wrlJsonFromAdif(const QString &adif) const
     if (!pota.isEmpty() || !sota.isEmpty()) {
         QJsonArray acts;
         if (!pota.isEmpty()) {
-            QJsonObject a; a.insert("type", "POTA"); a.insert("reference", pota); acts.append(a);
+            QJsonObject a; a.insert("type", "POTA"); a.insert("ref", pota); a.insert("isPrimary", true); acts.append(a);
         }
         if (!sota.isEmpty()) {
-            QJsonObject a; a.insert("type", "SOTA"); a.insert("reference", sota); acts.append(a);
+            QJsonObject a; a.insert("type", "SOTA"); a.insert("ref", sota); if (acts.isEmpty()) a.insert("isPrimary", true); acts.append(a);
         }
         o.insert("theirActivities", acts);
     }
@@ -1448,10 +1461,19 @@ void MshvEnhancedController::completeUpload(QNetworkReply *reply)
     const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
     const bool ok = reply->error() == QNetworkReply::NoError && status >= 200 && status < 300;
 
+    int retryDelayMs = 250;
     if (!ok) {
         const QString service = reply->property("upload_service").toString();
         const int attempts = reply->property("upload_attempts").toInt();
-        if (attempts < 2) {
+
+        // Authentication and validation errors require operator action; do not
+        // hammer either service. Retry only network/5xx/429 failures.
+        const bool transient =
+            reply->error() != QNetworkReply::NoError ||
+            status == 429 ||
+            status >= 500;
+
+        if (transient && attempts < 2) {
             UploadJob j;
             j.service = service;
             j.attempts = attempts + 1;
@@ -1465,8 +1487,17 @@ void MshvEnhancedController::completeUpload(QNetworkReply *reply)
                 j.headers.insert("Authorization", QByteArray("Bearer ") + wrlApiKey_.toUtf8());
             }
             uploadQueue_.push_back(j);
+
+            if (status == 429) {
+                bool retryOk = false;
+                const int retrySeconds = reply->rawHeader("Retry-After").toInt(&retryOk);
+                if (retryOk && retrySeconds > 0)
+                    retryDelayMs = qMin(retrySeconds, 300) * 1000;
+            } else {
+                retryDelayMs = 1500 * (attempts + 1);
+            }
         }
     }
 
-    QTimer::singleShot(250, this, [this]() { pumpUploads(); });
+    QTimer::singleShot(retryDelayMs, this, [this]() { pumpUploads(); });
 }
