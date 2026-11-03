@@ -154,6 +154,8 @@ def apply(upstream: Path) -> None:
             THvTxW, SLOT(DecListTextAll(QString,QString,QString,QString,QString)));
     connect(enhancedController, SIGNAL(ensureAutoRequested()),
             this, SLOT(EnhancedEnsureAuto()));
+    connect(enhancedController, SIGNAL(requestCq()),
+            THvTxW, SLOT(ResetQSO()));
     connect(enhancedController, SIGNAL(haltTxRequested()),
             this, SLOT(EnhancedHaltTx()));
     connect(enhancedController, SIGNAL(skipTx1Changed(bool)),
