@@ -32,6 +32,25 @@ QString upperTrimmed(const QString &s)
     return s.trimmed().toUpper();
 }
 
+QString normalizeBandName(const QString &value)
+{
+    const QString b = value.trimmed().toUpper();
+    static const QHash<QString,QString> map = {
+        {"135 KHZ","2190M"}, {"472 KHZ","630M"}, {"501 KHZ","560M"},
+        {"1.8 MHZ","160M"}, {"3.5 MHZ","80M"}, {"5 MHZ","60M"},
+        {"7 MHZ","40M"}, {"10 MHZ","30M"}, {"14 MHZ","20M"},
+        {"18 MHZ","17M"}, {"21 MHZ","15M"}, {"24 MHZ","12M"},
+        {"27 MHZ","11M"}, {"28 MHZ","10M"}, {"40 MHZ","8M"},
+        {"50 MHZ","6M"}, {"60 MHZ","5M"}, {"70 MHZ","4M"},
+        {"144 MHZ","2M"}, {"222 MHZ","1.25M"}, {"432 MHZ","70CM"},
+        {"902 MHZ","33CM"}, {"1296 MHZ","23CM"}, {"2320 MHZ","13CM"},
+        {"3.4 GHZ","9CM"}, {"5.65 GHZ","6CM"}, {"10 GHZ","3CM"},
+        {"24 GHZ","1.25CM"}, {"47 GHZ","6MM"}, {"76 GHZ","4MM"},
+        {"120 GHZ","2.5MM"}, {"144 GHZ","2MM"}, {"248 GHZ","1MM"}
+    };
+    return map.value(b, b);
+}
+
 bool truthyAdif(const QString &s)
 {
     const QString v = s.trimmed().toUpper();
@@ -418,8 +437,9 @@ void MshvEnhancedController::setStationIdentity(const QString &call, const QStri
 
 void MshvEnhancedController::setBand(const QString &band)
 {
-    if (band.trimmed() == myBand_) return;
-    myBand_ = band.trimmed();
+    const QString normalized = normalizeBandName(band);
+    if (normalized == myBand_) return;
+    myBand_ = normalized;
     activeCall_.clear();
     activeEngaged_ = false;
     stations_.clear();
@@ -626,7 +646,7 @@ void MshvEnhancedController::onAdifRecord(QString adif)
 
     HistoryRow row;
     row.call = call;
-    row.band = adifValue(adif, "BAND");
+    row.band = normalizeBandName(adifValue(adif, "BAND"));
     row.mode = adifValue(adif, "SUBMODE");
     if (row.mode.isEmpty()) row.mode = adifValue(adif, "MODE");
     row.grid = adifValue(adif, "GRIDSQUARE").toUpper();
@@ -896,7 +916,8 @@ int MshvEnhancedController::targetNeedLevel(const Candidate &candidate) const
     auto workedEntity = [this, &candidate, bandSpecific]() {
         if (!candidate.entity.valid) return true;
         for (const HistoryRow &h : history_) {
-            if (bandSpecific && !candidate.band.isEmpty() && h.band.compare(candidate.band, Qt::CaseInsensitive) != 0) continue;
+            if (bandSpecific && !candidate.band.isEmpty() &&
+            normalizeBandName(h.band) != normalizeBandName(candidate.band)) continue;
             if (!h.country.isEmpty() && h.country.compare(candidate.entity.country, Qt::CaseInsensitive) == 0) return true;
             Entity e = resolveEntity(h.call);
             if (e.valid && e.country == candidate.entity.country) return true;
@@ -907,7 +928,8 @@ int MshvEnhancedController::targetNeedLevel(const Candidate &candidate) const
     auto workedGrid = [this, &candidate, bandSpecific]() {
         if (candidate.grid.isEmpty()) return true;
         for (const HistoryRow &h : history_) {
-            if (bandSpecific && !candidate.band.isEmpty() && h.band.compare(candidate.band, Qt::CaseInsensitive) != 0) continue;
+            if (bandSpecific && !candidate.band.isEmpty() &&
+            normalizeBandName(h.band) != normalizeBandName(candidate.band)) continue;
             if (h.grid.toUpper() == candidate.grid.toUpper()) return true;
         }
         return false;
@@ -916,7 +938,8 @@ int MshvEnhancedController::targetNeedLevel(const Candidate &candidate) const
     auto workedItu = [this, &candidate, bandSpecific]() {
         if (candidate.entity.ituZone <= 0) return true;
         for (const HistoryRow &h : history_) {
-            if (bandSpecific && !candidate.band.isEmpty() && h.band.compare(candidate.band, Qt::CaseInsensitive) != 0) continue;
+            if (bandSpecific && !candidate.band.isEmpty() &&
+            normalizeBandName(h.band) != normalizeBandName(candidate.band)) continue;
             int z = h.ituZone;
             if (z <= 0) z = resolveEntity(h.call).ituZone;
             if (z == candidate.entity.ituZone) return true;
@@ -927,7 +950,8 @@ int MshvEnhancedController::targetNeedLevel(const Candidate &candidate) const
     auto workedCq = [this, &candidate, bandSpecific]() {
         if (candidate.entity.cqZone <= 0) return true;
         for (const HistoryRow &h : history_) {
-            if (bandSpecific && !candidate.band.isEmpty() && h.band.compare(candidate.band, Qt::CaseInsensitive) != 0) continue;
+            if (bandSpecific && !candidate.band.isEmpty() &&
+            normalizeBandName(h.band) != normalizeBandName(candidate.band)) continue;
             int z = h.cqZone;
             if (z <= 0) z = resolveEntity(h.call).cqZone;
             if (z == candidate.entity.cqZone) return true;
@@ -963,7 +987,8 @@ bool MshvEnhancedController::targetNeeded(const Candidate &candidate) const
 bool MshvEnhancedController::historyMatchesPeriod(const HistoryRow &row, const Candidate &candidate, bool bandSpecific) const
 {
     if (normalizedCall(row.call) != normalizedCall(candidate.call)) return false;
-    if (bandSpecific && !candidate.band.isEmpty() && row.band.compare(candidate.band, Qt::CaseInsensitive) != 0) return false;
+    if (bandSpecific && !candidate.band.isEmpty() &&
+        normalizeBandName(row.band) != normalizeBandName(candidate.band)) return false;
     if (interval_ == Always) return false;
     if (interval_ == Once) return true;
 
@@ -983,7 +1008,8 @@ bool MshvEnhancedController::achievementConfirmed(const Candidate &candidate, bo
 {
     for (const HistoryRow &h : history_) {
         if (!h.confirmed) continue;
-        if (bandSpecific && !candidate.band.isEmpty() && h.band.compare(candidate.band, Qt::CaseInsensitive) != 0) continue;
+        if (bandSpecific && !candidate.band.isEmpty() &&
+            normalizeBandName(h.band) != normalizeBandName(candidate.band)) continue;
 
         if (target_ == Dxcc || target_ == Icdg) {
             Entity e = resolveEntity(h.call);
@@ -1097,7 +1123,7 @@ void MshvEnhancedController::loadHistory()
         HistoryRow row;
         row.call = normalizedCall(adifValue(adif, "CALL"));
         if (row.call.isEmpty()) continue;
-        row.band = adifValue(adif, "BAND");
+        row.band = normalizeBandName(adifValue(adif, "BAND"));
         row.mode = adifValue(adif, "SUBMODE");
         if (row.mode.isEmpty()) row.mode = adifValue(adif, "MODE");
         row.grid = adifValue(adif, "GRIDSQUARE").toUpper();
