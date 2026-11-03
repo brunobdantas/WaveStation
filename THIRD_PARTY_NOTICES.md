@@ -1,15 +1,10 @@
 # Third-party notices
 
-## MSHV
+MSHV is Copyright (C) Hrisimir Hristov - LZ2HV and licensed under GNU GPL v3.
+This build is an unofficial modified derivative.
 
-Base application: MSHV by Hrisimir Hristov, LZ2HV.
+Automation behavior is derived from FT8CoPilot:
+https://github.com/rampa069/ft8copilot
 
-- Source: https://github.com/LZ2HV/MSHV
-- License: GNU General Public License v3
-- Pinned revision: `50ea1a7b5bf20c688ccc72107e389f06673deac6`
-
-MSHV Enhanced is a modified/derived build and is not an official MSHV release.
-
-## Online services
-
-Optional integrations may communicate with services selected and configured by the operator, including Club Log, HRDLog.net and World Radio League. Credentials must never be committed to this repository.
+FT8CoPilot is distributed under the BSD 3-Clause License.
+Copyright (c) 2023, Fred Cirera.

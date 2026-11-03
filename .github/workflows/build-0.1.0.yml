@@ -1,0 +1,175 @@
+name: Build MSHV FT8CoPilot AutoPilot 0.1.0
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - 'release/0.1.0-ft8copilot'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ft8copilot-010-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: windows-2022
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Download official MSHV 2.76.8 rc008
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $sha='50ea1a7b5bf20c688ccc72107e389f06673deac6'
+          Invoke-WebRequest -Uri "https://github.com/LZ2HV/MSHV/archive/$sha.zip" -OutFile mshv.zip
+          Expand-Archive mshv.zip -DestinationPath work -Force
+          $src=Get-ChildItem work -Directory | Select-Object -First 1
+          if(-not $src){throw 'MSHV archive did not extract'}
+          Move-Item $src.FullName work/MSHV
+          Set-Content work/MSHV/.autopilot-upstream-revision $sha -Encoding ascii
+
+      - name: Apply AutoPilot integration
+        shell: pwsh
+        run: |
+          python -m py_compile tools/apply_autopilot.py
+          if($LASTEXITCODE -ne 0){throw 'patcher syntax failed'}
+          python tools/apply_autopilot.py work/MSHV
+          if($LASTEXITCODE -ne 0){throw 'patch failed'}
+
+      - name: Install Qt 5.15.2 MinGW
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '5.15.2'
+          host: windows
+          target: desktop
+          arch: win64_mingw81
+          tools: 'tools_mingw,qt.tools.win64_mingw810'
+          cache: true
+
+      - name: Build Windows x64
+        shell: pwsh
+        working-directory: work/MSHV
+        run: |
+          qmake MSHV_WIN64.pro CONFIG+=release
+          if($LASTEXITCODE -ne 0){throw 'qmake failed'}
+          mingw32-make -j2
+          if($LASTEXITCODE -ne 0){throw 'build failed'}
+          if(-not (Test-Path bin/MSHV-FT8CoPilot.exe)){throw 'EXE missing'}
+
+      - name: Stage portable package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force package | Out-Null
+          Copy-Item work/MSHV/bin/* package -Recurse -Force
+          $qtBin=Join-Path $env:QT_ROOT_DIR 'bin'
+          $plugins=$env:QT_PLUGIN_PATH
+          foreach($dll in @('Qt5Core.dll','Qt5Gui.dll','Qt5Network.dll','Qt5Sql.dll','Qt5WebSockets.dll','Qt5Widgets.dll')){
+            $p=Join-Path $qtBin $dll
+            if(Test-Path $p){Copy-Item $p package -Force}
+          }
+          foreach($dll in @('libEGL.dll','libGLESv2.dll','d3dcompiler_47.dll','opengl32sw.dll','Qt5Svg.dll')){
+            $p=Join-Path $qtBin $dll
+            if(Test-Path $p){Copy-Item $p package -Force}
+          }
+          New-Item -ItemType Directory -Force package/platforms | Out-Null
+          Copy-Item (Join-Path $plugins 'platforms/qwindows.dll') package/platforms/qwindows.dll -Force
+          foreach($dir in @('styles','imageformats')){
+            $p=Join-Path $plugins $dir
+            if(Test-Path $p){Copy-Item $p "package/$dir" -Recurse -Force}
+          }
+          $mingw=Split-Path -Parent (Get-Command mingw32-make.exe).Source
+          foreach($dll in @('libgcc_s_seh-1.dll','libstdc++-6.dll','libwinpthread-1.dll')){
+            Copy-Item (Join-Path $mingw $dll) package -Force
+          }
+          Copy-Item README.md,UPSTREAM.md,THIRD_PARTY_NOTICES.md package -Force
+          Copy-Item work/MSHV/COPYING.txt package/COPYING-MSHV-GPL3.txt -Force
+
+      - name: Smoke test EXE
+        shell: pwsh
+        run: |
+          $p=Start-Process -FilePath "$PWD/package/MSHV-FT8CoPilot.exe" -WorkingDirectory "$PWD/package" -PassThru
+          Start-Sleep -Seconds 12
+          $p.Refresh()
+          if($p.HasExited){throw "EXE exited during smoke test: $($p.ExitCode)"}
+          Stop-Process -Id $p.Id -Force
+
+      - name: Create portable ZIP
+        shell: pwsh
+        run: |
+          tar.exe -a -c -f MSHV-FT8CoPilot-AutoPilot-0.1.0-Portable.zip -C package .
+          if($LASTEXITCODE -ne 0){throw 'zip failed'}
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          $iss=@'
+          [Setup]
+          AppId={{F37E9191-6153-4DF2-9D63-7A38B8F80100}
+          AppName=MSHV + FT8CoPilot AutoPilot
+          AppVersion=0.1.0
+          AppPublisher=Unofficial MSHV derivative
+          DefaultDirName={autopf}\MSHV FT8CoPilot AutoPilot
+          DefaultGroupName=MSHV FT8CoPilot AutoPilot
+          OutputDir=.
+          OutputBaseFilename=MSHV-FT8CoPilot-AutoPilot-0.1.0-Setup
+          Compression=lzma2
+          SolidCompression=yes
+          ArchitecturesAllowed=x64compatible
+          ArchitecturesInstallIn64BitMode=x64compatible
+          UninstallDisplayIcon={app}\MSHV-FT8CoPilot.exe
+
+          [Files]
+          Source: "package\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+
+          [Icons]
+          Name: "{group}\MSHV + FT8CoPilot AutoPilot"; Filename: "{app}\MSHV-FT8CoPilot.exe"
+          Name: "{autodesktop}\MSHV + FT8CoPilot AutoPilot"; Filename: "{app}\MSHV-FT8CoPilot.exe"; Tasks: desktopicon
+
+          [Tasks]
+          Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional icons:"
+
+          [Run]
+          Filename: "{app}\MSHV-FT8CoPilot.exe"; Description: "Launch MSHV + FT8CoPilot AutoPilot"; Flags: nowait postinstall skipifsilent
+          '@
+          Set-Content installer.iss $iss -Encoding UTF8
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" installer.iss
+          if($LASTEXITCODE -ne 0){throw 'installer build failed'}
+
+      - name: Hashes
+        shell: pwsh
+        run: |
+          $items=@(
+            'MSHV-FT8CoPilot-AutoPilot-0.1.0-Setup.exe',
+            'MSHV-FT8CoPilot-AutoPilot-0.1.0-Portable.zip',
+            'package/MSHV-FT8CoPilot.exe'
+          )
+          $out=@()
+          foreach($f in $items){
+            $h=(Get-FileHash $f -Algorithm SHA256).Hash.ToLowerInvariant()
+            $out += "$h  $f"
+          }
+          $out | Set-Content SHA256SUMS.txt -Encoding ascii
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MSHV-FT8CoPilot-AutoPilot-0.1.0-Windows-x64
+          path: |
+            MSHV-FT8CoPilot-AutoPilot-0.1.0-Setup.exe
+            MSHV-FT8CoPilot-AutoPilot-0.1.0-Portable.zip
+            SHA256SUMS.txt
+            package/MSHV-FT8CoPilot.exe
+          if-no-files-found: error
+          retention-days: 30

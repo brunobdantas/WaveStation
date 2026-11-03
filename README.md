@@ -1,27 +1,21 @@
-# MSHV Enhanced
+# MSHV + FT8CoPilot AutoPilot 0.1.0
 
-MSHV Enhanced is an experimental Windows derivative of the official **MSHV** project, focused on advanced FT8/FT4/FT2 automation and online logbook integration.
+A deliberately small derivative of the official **MSHV** project with one added feature:
+an in-process AutoPilot based on the public FT8CoPilot selection/automation behavior.
 
-## Upstream
+## Baselines
 
-Pinned upstream revision:
+- MSHV: 2.76.8 rc008, commit `50ea1a7b5bf20c688ccc72107e389f06673deac6`
+- FT8CoPilot behavioral reference: commit `a1adf77ac6a691914d250f607e3cb8f3223c9e6c`
 
-- MSHV 2.76.8 rc008
-- commit `50ea1a7b5bf20c688ccc72107e389f06673deac6`
-- official repository: https://github.com/LZ2HV/MSHV
+## 0.1.0 scope
 
-## Enhanced scope
+The original MSHV decoder, CAT/PTT, message generator, AutoSeq and logger remain in control.
+The AutoPilot only listens to decoded candidates, filters/ranks them and invokes the native
+MSHV QSO path.
 
-- Native in-process AutoQSO engine (HUNT / ANSWER / BOTH)
-- Candidate ranking, history-aware selection, retry/cooldown and watchdog
-- Automatic handoff to MSHV's own AutoSeq
-- Skip Tx1 using MSHV's native implementation
-- Direct-caller priority and busy-target detection
-- Native MSHV Club Log and QRZ Logbook support retained
-- Added HRDLog real-time upload
-- Added World Radio League (WRL) real-time upload
-- Retry queue for added online services
+Supported selector chain: Any, CallSign, Grid, Continent, Country, CQZone, ITUZone,
+DXCC100 and Extra.
 
-The legacy WaveStation/RTTY work is preserved in branch `archive/legacy-wavestation-rtty`.
-
-> Experimental software. Validate CAT/PTT, frequency, audio and power at low power or into a dummy load before enabling automatic transmission.
+AutoPilot always starts PAUSED. This release intentionally excludes QRZ enrichment,
+online log integrations, POTA/SOTA APIs and Skip Tx1.

@@ -1,8 +1,0 @@
-MSHV Enhanced upstream pin
-
-Repository: https://github.com/LZ2HV/MSHV
-Commit: 50ea1a7b5bf20c688ccc72107e389f06673deac6
-Version: MSHV v.2.76.8 rc008
-Commit date: 2026-10-23
-
-Builds must fail if the downloaded source does not match this revision.
